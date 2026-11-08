@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Live Conflicts — 3D Globe</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; color: #e8e6df;
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: radial-gradient(1200px 800px at 50% 38%, #2a0f14 0%, #140a18 45%, #07060d 100%);
+  }
+  header { max-width: 880px; margin: 0 auto; padding: 22px 18px 4px; }
+  .panel {
+    background: rgba(16, 14, 26, .82); border: 1px solid #33304d; border-radius: 16px;
+    padding: 14px 16px; backdrop-filter: blur(4px);
+  }
+  h1 { font-size: 20px; margin: 0 0 2px; }
+  h1 .engine { font-size: 12px; color: #9d97b8; font-weight: 500; margin-left: 6px; }
+  .src { font-size: 12.5px; color: #b7b2cc; margin: 2px 0; }
+  #status { font-size: 13px; font-weight: 700; margin-top: 6px; }
+  #status.live { color: #ff7a6e; }
+  #status.dead { color: #ff9d5c; }
+  #status.loading { color: #9d97b8; }
+  .fineprint { font-size: 12px; color: #8f8aa8; line-height: 1.5; margin-top: 8px; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
+  button {
+    background: #1d1a2e; color: #e8e6df; border: 1px solid #454166; border-radius: 10px;
+    padding: 9px 14px; font-size: 13px; cursor: pointer; min-height: 44px;
+  }
+  button:active { transform: scale(.98); }
+  #globe-wrap { max-width: 980px; margin: 8px auto 0; padding: 0 10px; }
+  #globe { width: 100%; height: min(72vh, 640px); border-radius: 20px; overflow: hidden; }
+  #card {
+    max-width: 880px; margin: 12px auto 26px; padding: 0 18px; display: none;
+  }
+  #card .panel { border-color: #5a3442; }
+  #card h2 { font-size: 16px; margin: 0 0 4px; }
+  #card p { font-size: 13.5px; margin: 3px 0; color: #cfcaba; }
+  #card a { color: #ff9d8a; }
+  footer { max-width: 880px; margin: 0 auto; padding: 0 18px 30px; font-size: 12px; color: #77728f; }
+</style>
+</head>
+<body>
+<header>
+  <div class="panel">
+    <h1>Live Conflicts <span class="engine">built on globe.gl</span></h1>
+    <p class="src">Source: GDELT 2.0 events — conflict reports machine-coded from world news, refreshed at the source every 15 minutes. This page's data file is rebuilt by a scheduled robot every ~30 minutes.</p>
+    <div id="status" class="loading">Loading the latest feed…</div>
+    <div class="row">
+      <button id="refresh" type="button">Refresh now</button>
+      <span class="src" id="next"></span>
+    </div>
+    <p class="fineprint">Each point is a place where news reports in the last ~60 minutes described an assault, a fight or armed clash, or mass violence. Point size grows with the number of reports. This is machine-coded news, not a verified battlefield feed — it can include ordinary crime and coding errors, and quiet places may simply have no coverage. If the feed cannot be loaded, this page shows no points rather than inventing any.</p>
+  </div>
+</header>
+
+<div id="globe-wrap"><div id="globe"></div></div>
+
+<div id="card"><div class="panel">
+  <h2 id="card-title"></h2>
+  <p id="card-body"></p>
+  <p id="card-link"></p>
+</div></div>
+
+<footer>Part of Chris's Portfolio Story Map system — the Live Conflicts companion page, hosted on GitHub Pages because published map pages cannot call outside data feeds directly.</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/globe.gl@2.46.2/dist/globe-gl.min.js"></script>
+<script>
+  const statusEl = document.getElementById('status');
+  const nextEl = document.getElementById('next');
+  const card = document.getElementById('card');
+  let globe = null, lastData = null;
+
+  function fmtET(iso) {
+    try {
+      return new Date(iso).toLocaleString('en-US', {
+        timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit',
+        month: 'short', day: 'numeric'
+      }) + ' ET';
+    } catch (e) { return iso; }
+  }
+
+  function showCard(p) {
+    document.getElementById('card-title').textContent = p.name;
+    document.getElementById('card-body').textContent =
+      p.kind + ' · ' + p.events + ' event report' + (p.events === 1 ? '' : 's') +
+      ' · ' + p.articles + ' article' + (p.articles === 1 ? '' : 's') +
+      ' in the last ~60 minutes · ' + p.lat.toFixed(2) + ', ' + p.lon.toFixed(2);
+    document.getElementById('card-link').innerHTML = p.url
+      ? 'Sample report: <a href="' + p.url + '" target="_blank" rel="noopener">open the article</a>'
+      : '';
+    card.style.display = 'block';
+    card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  function buildGlobe(points) {
+    const el = document.getElementById('globe');
+    if (!globe) {
+      globe = Globe()(el)
+        .backgroundColor('rgba(0,0,0,0)')
+        .showAtmosphere(true)
+        .atmosphereColor('#7a2436')
+        .atmosphereAltitude(0.22)
+        .pointsData(points)
+        .pointLat('lat').pointLng('lon')
+        .pointColor(() => '#ff5a4e')
+        .pointAltitude(d => 0.02 + Math.min(0.16, d.articles * 0.012))
+        .pointRadius(d => 0.32 + Math.min(0.9, Math.sqrt(d.articles) * 0.16))
+        .pointLabel(d => '<b>' + d.name + '</b><br>' + d.kind + ' · ' + d.articles + ' articles')
+        .onPointClick(showCard);
+      globe.controls().autoRotate = true;
+      globe.controls().autoRotateSpeed = 0.55;
+      el.addEventListener('pointerdown', () => { globe.controls().autoRotate = false; }, { once: true });
+      // Country outlines, with a night-earth image as fallback if the file cannot load.
+      fetch('https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_110m_admin_0_countries.geojson')
+        .then(r => r.json())
+        .then(geo => {
+          globe.polygonsData(geo.features)
+            .polygonCapColor(() => 'rgba(46,52,92,0.85)')
+            .polygonSideColor(() => 'rgba(20,22,44,0.6)')
+            .polygonStrokeColor(() => '#5a6090')
+            .polygonAltitude(0.005);
+        })
+        .catch(() => {
+          globe.globeImageUrl('https://unpkg.com/three-globe/example/img/earth-night.jpg');
+        });
+    } else {
+      globe.pointsData(points);
+    }
+  }
+
+  async function loadFeed(manual) {
+    statusEl.className = 'loading';
+    statusEl.textContent = 'Loading the latest feed…';
+    try {
+      const r = await fetch('points.json?t=' + Date.now(), { cache: 'no-store' });
+      if (!r.ok) throw new Error('feed file missing');
+      const data = await r.json();
+      lastData = data;
+      buildGlobe(data.points || []);
+      statusEl.className = 'live';
+      statusEl.textContent = 'Live · ' + data.count + ' places · feed built ' + fmtET(data.generated_at);
+      nextEl.textContent = data.window + '.';
+    } catch (e) {
+      statusEl.className = 'dead';
+      statusEl.textContent = 'Feed unreachable in this view · no points shown';
+      nextEl.textContent = 'Nothing stands in for the data: no saved, sample or made-up points.';
+      buildGlobe([]);
+    }
+  }
+
+  document.getElementById('refresh').addEventListener('click', () => loadFeed(true));
+  loadFeed(false);
+  setInterval(() => loadFeed(false), 15 * 60 * 1000);
+</script>
+</body>
+</html>
