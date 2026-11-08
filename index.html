@@ -67,7 +67,7 @@
 
 <footer>Part of Chris's Portfolio Story Map system — the Live Conflicts companion page, hosted on GitHub Pages because published map pages cannot call outside data feeds directly.</footer>
 
-<script src="https://cdn.jsdelivr.net/npm/globe.gl@2.46.2/dist/globe-gl.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/globe.gl@2.46.2/dist/globe.gl.min.js"></script>
 <script>
   const statusEl = document.getElementById('status');
   const nextEl = document.getElementById('next');
@@ -135,6 +135,12 @@
   async function loadFeed(manual) {
     statusEl.className = 'loading';
     statusEl.textContent = 'Loading the latest feed…';
+    if (typeof Globe === 'undefined') {
+      statusEl.className = 'dead';
+      statusEl.textContent = 'Globe library failed to load · the feed itself is fine — try Refresh';
+      nextEl.textContent = 'No points are drawn until the library loads; nothing is faked in the meantime.';
+      return;
+    }
     try {
       const r = await fetch('points.json?t=' + Date.now(), { cache: 'no-store' });
       if (!r.ok) throw new Error('feed file missing');
